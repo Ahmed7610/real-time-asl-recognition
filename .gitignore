@@ -1,0 +1,139 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.old
+*.orig
+*.pid
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Collected datasets and generated samples
+data/
+dataset/
+datasets/
+dynamic_sequences/
+dynamic_train/
+static_landmarks/
+*.npy
+*.npz
+*.csv
+
+# Backups and development copies
+backups/
+backup/
+*_backup.py
+*_backup.js
+*_backup.html
+*_backup.keras
+*_before_*.py
+*_before_*.js
+*_before_*.html
+*_before_*.keras
+*_working_*.py
+*_working_*.js
+*_working_*.html
+*_copy.py
+*_copy.js
+*_copy.html
+*_old.py
+*_old.js
+*_old.html
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+
+# Frontend local artifacts
+frontend/node_modules/
+frontend/.cache/
+
+# Presentation temporary files
+~$*.pptx
+
+# Archives and generated docs
+*.zip
+*.rar
+*.7z
+*.tar
+*.tar.gz
+README.pdf
+
+# Local test utilities
+test_camera.py
+
+# Keep only the selected final Keras models
+Real-Time Sign Language Recognition/*.keras
+!Real-Time Sign Language Recognition/StaticModel.keras
+!Real-Time Sign Language Recognition/DynamicJModel_clean.keras
+!Real-Time Sign Language Recognition/DynamicZModel_trimmed.keras
+
+# Explicitly ignore legacy / experimental models
+Real-Time Sign Language Recognition/StaticModel_finetuned_AE.keras
+Real-Time Sign Language Recognition/StaticModel_finetuned_AE_v2.keras
+Real-Time Sign Language Recognition/StaticModel_custom.keras
+Real-Time Sign Language Recognition/StaticModel_custom_unweighted.keras
+Real-Time Sign Language Recognition/StaticModel_weighted_experiment.keras
+Real-Time Sign Language Recognition/StaticModel_before_final.keras
+Real-Time Sign Language Recognition/StaticModel_88percent_backup.keras
+Real-Time Sign Language Recognition/StaticModel_unweighted_backup.keras
+Real-Time Sign Language Recognition/StaticModel_before_AE.keras
+Real-Time Sign Language Recognition/StaticModel_before_AE_test.keras
+Real-Time Sign Language Recognition/DynamicJModel.keras
+Real-Time Sign Language Recognition/DynamicZModel.keras
+Real-Time Sign Language Recognition/DynamicJZModel.keras
+Real-Time Sign Language Recognition/DynamicZModel_before_trimming.keras
+
+
+
+# Local working backups
+backend_working_manual_jz/
+frontend_working_manual_jz/
+
+# Development snapshots
+Real-Time Sign Language Recognition/asl_inference_working_manual_jz.py
+frontend/app_before_manual_dynamic.js
+frontend/index_before_manual_dynamic.html
+
+# Experimental static models
+Real-Time Sign Language Recognition/StaticModel_finetuned_AE.keras
+Real-Time Sign Language Recognition/StaticModel_finetuned_AE_v2.keras
+
+# Experimental evaluation scripts
+training/evaluate_finetuned_model.py
+training/test_finetuned_AE.py

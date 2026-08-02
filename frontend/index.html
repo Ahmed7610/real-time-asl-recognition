@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Real-Time Sign Language Recognition</title>
+  <link rel="stylesheet" href="styles.css?v=final-ui-guide-1" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">✋</span>
+      <div>
+        <h1>Real-Time Sign Language Recognition</h1>
+        <p class="subtitle">
+          ASL fingerspelling · 24 static letters · guided J/Z motion
+        </p>
+      </div>
+    </div>
+
+    <div class="status">
+      <span id="statusDot" class="dot dot-off"></span>
+      <span id="statusText">Disconnected</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="panel camera-panel">
+      <div class="video-wrap">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+
+        <div id="videoHint" class="video-hint">
+          Click <strong>Start camera</strong> to begin
+        </div>
+
+        <div id="countdownOverlay" class="countdown-overlay hidden" aria-live="polite">
+          <div id="countdownValue" class="countdown-value">3</div>
+          <div id="countdownLabel" class="countdown-label">Get ready</div>
+        </div>
+
+        <div id="resultBanner" class="result-banner hidden" aria-live="polite">
+          <div id="resultIcon" class="result-icon">✓</div>
+          <div>
+            <div id="resultTitle" class="result-title">Detected Z</div>
+            <div id="resultDetails" class="result-details">Confidence 0%</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="readout">
+        <div class="letter-box">
+          <div id="letter" class="letter">–</div>
+          <div id="sourceTag" class="source-tag">idle</div>
+        </div>
+
+        <div class="meters">
+          <div class="meter">
+            <div class="meter-label">
+              <span>Confidence</span>
+              <span id="confVal">0%</span>
+            </div>
+            <div class="meter-track">
+              <div id="confBar" class="meter-fill"></div>
+            </div>
+          </div>
+
+          <div class="meter">
+            <div class="meter-label">
+              <span>Stability</span>
+              <span id="stabVal">0%</span>
+            </div>
+            <div class="meter-track">
+              <div id="stabBar" class="meter-fill meter-fill-gold"></div>
+            </div>
+          </div>
+
+          <div class="stat-row">
+            <span>FPS <b id="fps">0</b></span>
+            <span>Hand <b id="hand">no</b></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel side-panel">
+      <div class="mode-card">
+        <span class="mode-label">Current mode</span>
+        <strong id="modeText">Camera stopped</strong>
+      </div>
+
+      <div class="word-card">
+        <div class="word-header">
+          <div class="word-label">Translated text</div>
+          <div class="word-actions">
+            <button id="copyBtn" class="mini-btn" disabled>Copy</button>
+            <button id="speakBtn" class="mini-btn" disabled>Speak</button>
+          </div>
+        </div>
+        <div id="word" class="word"></div>
+      </div>
+
+      <div class="controls">
+        <div class="btn-row">
+          <button id="startBtn" class="btn btn-primary">Start camera</button>
+          <button id="stopBtn" class="btn" disabled>Stop</button>
+        </div>
+
+        <button id="dynamicBtn" class="btn btn-dynamic" disabled>
+          Record J/Z
+        </button>
+
+        <div id="dynamicProgressWrap" class="dynamic-progress-wrap hidden">
+          <div class="dynamic-progress-label">
+            <span id="dynamicProgressText">Recording motion...</span>
+            <span id="dynamicProgressTime">3.0s</span>
+          </div>
+          <div class="dynamic-progress-track">
+            <div id="dynamicProgressBar" class="dynamic-progress-bar"></div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button id="spaceBtn" class="btn btn-ghost" disabled>Space</button>
+          <button id="backBtn" class="btn btn-ghost" disabled>⌫ Backspace</button>
+          <button id="clearBtn" class="btn btn-ghost" disabled>Clear</button>
+        </div>
+      </div>
+
+
+      <section class="reference-card" aria-labelledby="referenceTitle">
+        <div class="reference-copy">
+          <span class="reference-kicker">Quick reference</span>
+          <h2 id="referenceTitle">ASL Alphabet Guide</h2>
+          <p>
+            Open the visual guide whenever you need to check the correct hand
+            shape for a static letter or the motion direction for J and Z.
+          </p>
+
+          <button id="openGuideBtn" class="btn btn-reference" type="button">
+            View full guide
+          </button>
+        </div>
+
+        <button
+          id="openGuidePreview"
+          class="reference-preview"
+          type="button"
+          aria-label="Open the full ASL alphabet guide"
+        >
+          <img
+            src="asl_alphabet_guide.png"
+            alt="ASL alphabet hand-shape reference for letters A through Z"
+          />
+          <span>Open guide</span>
+        </button>
+      </section>
+
+      <div class="guide-card">
+        <div class="guide-title">How to use J/Z</div>
+        <ol class="guide-list">
+          <li>Press <strong>Record J/Z</strong> once.</li>
+          <li>Wait for the 3-second countdown.</li>
+          <li>Draw J or Z naturally during recording.</li>
+          <li>The result is detected automatically.</li>
+        </ol>
+      </div>
+
+      <details class="settings">
+        <summary>Settings</summary>
+
+        <label class="field">
+          <span>Backend URL</span>
+          <input id="backendUrl" type="text" value="http://127.0.0.1:8000" />
+        </label>
+
+        <label class="field">
+          <span>Send size (px)</span>
+          <input
+            id="sendSize"
+            type="number"
+            value="320"
+            min="160"
+            max="640"
+            step="20"
+          />
+        </label>
+
+        <p class="hint">
+          Hold a static letter steady to type it. Release or change the hand
+          pose before repeating the same letter.
+        </p>
+      </details>
+
+      <div class="legend">
+        <span class="legend-item">
+          <span class="chip chip-green"></span>
+          static recognition
+        </span>
+        <span class="legend-item">
+          <span class="chip chip-blue"></span>
+          J/Z recording
+        </span>
+      </div>
+    </section>
+  </main>
+
+
+  <div
+    id="guideModal"
+    class="guide-modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="guideModalTitle"
+  >
+    <div id="guideModalBackdrop" class="guide-modal-backdrop"></div>
+
+    <div class="guide-modal-panel">
+      <div class="guide-modal-header">
+        <div>
+          <span class="reference-kicker">Reference</span>
+          <h2 id="guideModalTitle">ASL Alphabet Guide</h2>
+        </div>
+
+        <button
+          id="closeGuideBtn"
+          class="guide-close-btn"
+          type="button"
+          aria-label="Close ASL alphabet guide"
+        >
+          ×
+        </button>
+      </div>
+
+      <div class="guide-modal-body">
+        <img
+          src="asl_alphabet_guide.png"
+          alt="Full ASL alphabet hand-shape reference for letters A through Z"
+        />
+      </div>
+
+      <p class="guide-modal-note">
+        J and Z are dynamic letters. Use the blue <strong>Record J/Z</strong>
+        button and follow the motion arrows shown in the guide.
+      </p>
+    </div>
+  </div>
+
+  <footer class="footer">
+    DEPI · Microsoft Machine Learning Program — Graduation Project
+  </footer>
+
+  <script src="app.js?v=final-ui-guide-1"></script>
+</body>
+</html>
