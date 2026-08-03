@@ -116,11 +116,22 @@ function setMode(text) {
 }
 
 function backendBase() {
-  return els.url.value.trim().replace(/\/+$/, "");
+  const configured = els.url.value.trim();
+
+  if (!configured || configured.toLowerCase() === "auto") {
+    return window.location.origin;
+  }
+
+  return configured.replace(/\/+$/, "");
 }
 
 function websocketUrl() {
-  return `${backendBase().replace(/^http/, "ws")}/ws?session_id=${encodeURIComponent(SESSION_ID)}`;
+  const base = backendBase();
+  const socketBase = base
+    .replace(/^https:/, "wss:")
+    .replace(/^http:/, "ws:");
+
+  return `${socketBase}/ws?session_id=${encodeURIComponent(SESSION_ID)}`;
 }
 
 function setTextActionState() {

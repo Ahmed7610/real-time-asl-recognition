@@ -34,6 +34,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 
@@ -98,6 +99,36 @@ def find_models_dir() -> str:
 
 
 MODELS_DIR = find_models_dir()
+
+def find_frontend_dir() -> str:
+    """Find the frontend directory in local and Docker environments."""
+    env_path = os.environ.get("FRONTEND_DIR")
+
+    candidates: list[str] = []
+    if env_path:
+        candidates.append(env_path)
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates.extend(
+        [
+            os.path.join(here, "..", "frontend"),
+            os.path.join(here, "frontend"),
+            "/app/frontend",
+        ]
+    )
+
+    for candidate in candidates:
+        if candidate and os.path.exists(os.path.join(candidate, "index.html")):
+            return os.path.abspath(candidate)
+
+    raise RuntimeError(
+        "Could not find the frontend directory. "
+        "Set FRONTEND_DIR to the folder containing index.html."
+    )
+
+
+FRONTEND_DIR = find_frontend_dir()
+
 
 if MODELS_DIR not in sys.path:
     sys.path.insert(
@@ -456,8 +487,8 @@ class WordEditBody(
 # -----------------------------------------------------------------------------
 # HTTP routes
 # -----------------------------------------------------------------------------
-@app.get("/")
-def root():
+@app.get("/api")
+def api_info():
     return {
         "service": (
             "Real-Time Sign Language Recognition API"
@@ -491,6 +522,7 @@ def health():
             else "loading"
         ),
         "models_dir": MODELS_DIR,
+        "frontend_dir": FRONTEND_DIR,
         "mode": "static+manual-jz",
         "static_classes": (
             engine.cfg["static_classes"]
@@ -874,3 +906,14 @@ async def unhandled_exception(
             "error": str(error),
         },
     )
+
+# -----------------------------------------------------------------------------
+# Frontend static application
+# -----------------------------------------------------------------------------
+# Mounted last so API and WebSocket routes above keep priority.
+app.mount(
+    "/",
+    StaticFiles(directory=FRONTEND_DIR, html=True),
+    name="frontend",
+)
+
