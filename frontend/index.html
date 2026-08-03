@@ -174,20 +174,8 @@
           <input id="backendUrl" type="text" value="auto" />
         </label>
 
-        <label class="field">
-          <span>Send size (px)</span>
-          <input
-            id="sendSize"
-            type="number"
-            value="320"
-            min="160"
-            max="640"
-            step="20"
-          />
-        </label>
-
         <p class="hint">
-          Hold a static letter steady to type it. Release or change the hand
+          Hand tracking runs locally in your browser for faster performance. Hold a static letter steady to type it. Release or change the hand
           pose before repeating the same letter.
         </p>
       </details>
@@ -250,6 +238,6 @@
     DEPI · Microsoft Machine Learning Program — Graduation Project
   </footer>
 
-  <script src="app.js?v=render-deploy-1"></script>
+  <script type="module" src="app.js?v=browser-mediapipe-1"></script>
 </body>
 </html>

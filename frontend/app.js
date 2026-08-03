@@ -1,7 +1,13 @@
-/* Final frontend client
-   - Static recognition runs continuously.
-   - J/Z uses one-click countdown + automatic 3-second recording.
-   - Keeps the working mirror/landmark behavior from the tested version.
+import {
+  FilesetResolver,
+  HandLandmarker,
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs";
+
+/*
+  Browser-side MediaPipe version.
+
+  The browser performs hand detection and draws landmarks locally.
+  Only 21 x 3 landmark values are sent to the FastAPI backend.
 */
 
 const HAND_CONNECTIONS = [
@@ -16,7 +22,7 @@ const HAND_CONNECTIONS = [
 const COUNTDOWN_SECONDS = 3;
 const DYNAMIC_RECORDING_MS = 3000;
 const RESULT_VISIBLE_MS = 2200;
-const TARGET_INTERVAL_MS = 70;
+const LOCAL_TRACKING_INTERVAL_MS = 33;
 
 const $ = (id) => document.getElementById(id);
 
@@ -72,13 +78,9 @@ const els = {
   progressTime: $("dynamicProgressTime"),
 
   url: $("backendUrl"),
-  size: $("sendSize"),
 };
 
 const SESSION_ID = `web-${Math.random().toString(36).slice(2, 10)}`;
-
-const sendCanvas = document.createElement("canvas");
-const sendContext = sendCanvas.getContext("2d");
 const overlayContext = els.overlay.getContext("2d");
 
 let stream = null;
@@ -87,9 +89,15 @@ let running = false;
 let inFlight = false;
 let dynamicBusy = false;
 
-let lastSendTime = 0;
-let fpsEma = 0;
-let lastRenderedFrame = 0;
+let handLandmarker = null;
+let trackerDelegate = "CPU";
+let trackingAnimation = null;
+let lastTrackingTime = 0;
+let lastVideoTime = -1;
+let latestRawLandmarks = null;
+
+let trackingFpsEma = 0;
+let lastTrackedFrame = 0;
 
 let countdownTimer = null;
 let recordingTimer = null;
@@ -126,8 +134,7 @@ function backendBase() {
 }
 
 function websocketUrl() {
-  const base = backendBase();
-  const socketBase = base
+  const socketBase = backendBase()
     .replace(/^https:/, "wss:")
     .replace(/^http:/, "ws:");
 
@@ -154,7 +161,10 @@ function clearTimers() {
 
 function hideResultBanner() {
   els.resultBanner.classList.add("hidden");
-  els.resultBanner.classList.remove("result-success", "result-rejected");
+  els.resultBanner.classList.remove(
+    "result-success",
+    "result-rejected",
+  );
 }
 
 function showResultBanner(letter, confidence) {
@@ -171,13 +181,156 @@ function showResultBanner(letter, confidence) {
   els.resultTitle.textContent = accepted
     ? `Detected ${letter}`
     : "Motion not recognized";
+
   els.resultDetails.textContent = accepted
     ? `Confidence ${percent}%`
     : "Try again with a clearer motion";
 
-  resultTimer = setTimeout(() => {
-    hideResultBanner();
-  }, RESULT_VISIBLE_MS);
+  resultTimer = setTimeout(hideResultBanner, RESULT_VISIBLE_MS);
+}
+
+
+// -----------------------------------------------------------------------------
+// Browser-side MediaPipe
+// -----------------------------------------------------------------------------
+async function createHandTracker(delegate) {
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm",
+  );
+
+  return HandLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: `${backendBase()}/hand_landmarker.task`,
+      delegate,
+    },
+    runningMode: "VIDEO",
+    numHands: 1,
+    minHandDetectionConfidence: 0.5,
+    minHandPresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+  });
+}
+
+async function initializeHandTracker() {
+  if (handLandmarker) return;
+
+  setStatus("off", "Loading hand tracker…");
+  setMode("Loading MediaPipe in browser");
+
+  try {
+    handLandmarker = await createHandTracker("GPU");
+    trackerDelegate = "GPU";
+  } catch (gpuError) {
+    console.warn(
+      "MediaPipe GPU initialization failed; using CPU.",
+      gpuError,
+    );
+
+    handLandmarker = await createHandTracker("CPU");
+    trackerDelegate = "CPU";
+  }
+
+  console.log(`MediaPipe browser tracker ready (${trackerDelegate}).`);
+}
+
+function startTrackingLoop() {
+  if (trackingAnimation) {
+    cancelAnimationFrame(trackingAnimation);
+  }
+
+  const track = (now) => {
+    if (!running) return;
+
+    const videoReady = els.video.readyState >= 2;
+    const intervalReady =
+      now - lastTrackingTime >= LOCAL_TRACKING_INTERVAL_MS;
+    const newVideoFrame =
+      els.video.currentTime !== lastVideoTime;
+
+    if (
+      handLandmarker &&
+      videoReady &&
+      intervalReady &&
+      newVideoFrame
+    ) {
+      lastTrackingTime = now;
+      lastVideoTime = els.video.currentTime;
+
+      try {
+        const result = handLandmarker.detectForVideo(
+          els.video,
+          now,
+        );
+
+        const detected =
+          result.landmarks && result.landmarks.length > 0
+            ? result.landmarks[0]
+            : null;
+
+        latestRawLandmarks = detected
+          ? detected.map((point) => [
+              point.x,
+              point.y,
+              point.z,
+            ])
+          : null;
+
+        drawLandmarks(latestRawLandmarks);
+        els.hand.textContent = latestRawLandmarks ? "yes" : "no";
+        updateTrackingFps(now);
+
+        sendLatestLandmarks();
+      } catch (error) {
+        console.error("Browser hand tracking failed:", error);
+        setStatus("err", "Hand tracker error");
+      }
+    }
+
+    trackingAnimation = requestAnimationFrame(track);
+  };
+
+  trackingAnimation = requestAnimationFrame(track);
+}
+
+function sendLatestLandmarks() {
+  if (
+    !running ||
+    !ws ||
+    ws.readyState !== WebSocket.OPEN ||
+    inFlight
+  ) {
+    return;
+  }
+
+  // Preserve the mirrored coordinate convention used during training.
+  const modelLandmarks = latestRawLandmarks
+    ? latestRawLandmarks.map(([x, y, z]) => [
+        1 - x,
+        y,
+        z,
+      ])
+    : [];
+
+  inFlight = true;
+
+  ws.send(JSON.stringify({
+    type: "landmarks",
+    landmarks: modelLandmarks,
+  }));
+}
+
+function updateTrackingFps(now) {
+  if (lastTrackedFrame) {
+    const instantaneousFps = 1000 / (now - lastTrackedFrame);
+
+    trackingFpsEma = trackingFpsEma
+      ? trackingFpsEma * 0.8 + instantaneousFps * 0.2
+      : instantaneousFps;
+
+    els.fps.textContent = trackingFpsEma.toFixed(0);
+  }
+
+  lastTrackedFrame = now;
 }
 
 
@@ -186,8 +339,17 @@ function showResultBanner(letter, confidence) {
 // -----------------------------------------------------------------------------
 async function startCamera() {
   try {
+    els.start.disabled = true;
+    setMode("Preparing camera and hand tracker");
+
+    await initializeHandTracker();
+
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user" },
+      video: {
+        facingMode: "user",
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+      },
       audio: false,
     });
 
@@ -200,6 +362,9 @@ async function startCamera() {
     running = true;
     inFlight = false;
     dynamicBusy = false;
+    latestRawLandmarks = null;
+    lastVideoTime = -1;
+    lastTrackingTime = 0;
 
     els.start.disabled = true;
     els.stop.disabled = false;
@@ -219,9 +384,15 @@ async function startCamera() {
 
     connectWebSocket();
   } catch (error) {
-    setStatus("err", "Camera blocked");
+    console.error(error);
+
+    els.start.disabled = false;
+    setStatus("err", "Camera or tracker blocked");
     setMode("Camera unavailable");
-    alert(`Could not access the webcam: ${error.message}`);
+
+    alert(
+      `Could not start the camera or MediaPipe tracker: ${error.message}`,
+    );
   }
 }
 
@@ -231,6 +402,12 @@ function stopCamera() {
   running = false;
   inFlight = false;
   dynamicBusy = false;
+  latestRawLandmarks = null;
+
+  if (trackingAnimation) {
+    cancelAnimationFrame(trackingAnimation);
+    trackingAnimation = null;
+  }
 
   if (ws) {
     ws.close();
@@ -267,6 +444,7 @@ function stopCamera() {
   els.source.textContent = "idle";
   els.source.className = "source-tag";
   els.hand.textContent = "no";
+  els.fps.textContent = "0";
 
   setStatus("off", "Disconnected");
   setMode("Camera stopped");
@@ -292,9 +470,9 @@ function connectWebSocket() {
 
   ws.onopen = () => {
     setStatus("on", "Live");
-    setMode("Static recognition");
+    setMode(`Static recognition · tracker ${trackerDelegate}`);
     inFlight = false;
-    pump();
+    startTrackingLoop();
   };
 
   ws.onmessage = (event) => {
@@ -313,16 +491,10 @@ function connectWebSocket() {
       console.error("Server error:", data.error);
       setStatus("err", "Server error");
       setMode("Backend error");
-    } else {
-      render(data);
+      return;
     }
 
-    const delay = Math.max(
-      0,
-      TARGET_INTERVAL_MS - (performance.now() - lastSendTime),
-    );
-
-    setTimeout(pump, delay);
+    render(data);
   };
 
   ws.onerror = () => {
@@ -336,41 +508,6 @@ function connectWebSocket() {
       setMode("Backend disconnected");
     }
   };
-}
-
-function pump() {
-  if (
-    !running ||
-    !ws ||
-    ws.readyState !== WebSocket.OPEN ||
-    inFlight
-  ) {
-    return;
-  }
-
-  const width = Math.max(
-    160,
-    Math.min(640, parseInt(els.size.value, 10) || 320),
-  );
-  const height = Math.round((width * 3) / 4);
-
-  sendCanvas.width = width;
-  sendCanvas.height = height;
-
-  // Keep the tested mirrored input required by J/Z models.
-  sendContext.save();
-  sendContext.clearRect(0, 0, width, height);
-  sendContext.translate(width, 0);
-  sendContext.scale(-1, 1);
-  sendContext.drawImage(els.video, 0, 0, width, height);
-  sendContext.restore();
-
-  const image = sendCanvas.toDataURL("image/jpeg", 0.6);
-
-  lastSendTime = performance.now();
-  inFlight = true;
-
-  ws.send(JSON.stringify({ image }));
 }
 
 
@@ -461,9 +598,10 @@ function beginDynamicRecording() {
 
   progressAnimation = requestAnimationFrame(updateProgress);
 
-  recordingTimer = setTimeout(() => {
-    stopDynamicRecording();
-  }, DYNAMIC_RECORDING_MS);
+  recordingTimer = setTimeout(
+    stopDynamicRecording,
+    DYNAMIC_RECORDING_MS,
+  );
 }
 
 function stopDynamicRecording() {
@@ -506,7 +644,7 @@ function finishDynamicUi() {
   els.progressBar.style.width = "0%";
 
   setStatus("on", "Live");
-  setMode("Static recognition");
+  setMode(`Static recognition · tracker ${trackerDelegate}`);
 }
 
 
@@ -514,14 +652,10 @@ function finishDynamicUi() {
 // Rendering
 // -----------------------------------------------------------------------------
 function render(data) {
-  updateFps();
-
   const detectedLetter =
     data.letter && data.letter !== "nothing"
       ? data.letter
       : "–";
-
-  els.hand.textContent = data.hand_detected ? "yes" : "no";
 
   const confidence = Math.round((data.confidence || 0) * 100);
   const stability = Math.round((data.stability || 0) * 100);
@@ -537,7 +671,8 @@ function render(data) {
 
   if (data.motion_state === "recording") {
     els.letter.textContent = "–";
-    els.source.textContent = `recording J/Z (${data.dynamic?.frames_recorded || 0})`;
+    els.source.textContent =
+      `recording J/Z (${data.dynamic?.frames_recorded || 0})`;
     els.source.className = "source-tag source-dynamic";
     setStatus("on", "Recording J/Z");
     setMode("Recording dynamic sign");
@@ -555,36 +690,19 @@ function render(data) {
 
     console.log("Dynamic result:", data.dynamic);
     finishDynamicUi();
-  } else {
-    if (!dynamicBusy) {
-      els.letter.textContent = detectedLetter;
-      els.source.textContent = data.hand_detected ? "static" : "no hand";
-      els.source.className =
-        "source-tag" +
-        (data.hand_detected ? " source-static" : "");
+  } else if (!dynamicBusy) {
+    els.letter.textContent = detectedLetter;
+    els.source.textContent = latestRawLandmarks
+      ? "static"
+      : "no hand";
 
-      setStatus("on", "Live");
-      setMode("Static recognition");
-    }
+    els.source.className =
+      "source-tag" +
+      (latestRawLandmarks ? " source-static" : "");
+
+    setStatus("on", "Live");
+    setMode(`Static recognition · tracker ${trackerDelegate}`);
   }
-
-  drawLandmarks(data.landmarks);
-}
-
-function updateFps() {
-  const now = performance.now();
-
-  if (lastRenderedFrame) {
-    const instantaneousFps = 1000 / (now - lastRenderedFrame);
-
-    fpsEma = fpsEma
-      ? fpsEma * 0.8 + instantaneousFps * 0.2
-      : instantaneousFps;
-
-    els.fps.textContent = fpsEma.toFixed(0);
-  }
-
-  lastRenderedFrame = now;
 }
 
 function drawLandmarks(points) {
@@ -595,8 +713,8 @@ function drawLandmarks(points) {
 
   if (!points || !points.length) return;
 
-  // Keep the working alignment from the user's tested version.
-  const pointX = (point) => (1 - point[0]) * width;
+  // Video and overlay are mirrored by CSS, so raw x aligns correctly.
+  const pointX = (point) => point[0] * width;
   const pointY = (point) => point[1] * height;
 
   overlayContext.strokeStyle = "rgba(255,255,255,.72)";
@@ -662,8 +780,10 @@ async function copyText() {
 
   try {
     await navigator.clipboard.writeText(text);
+
     const previous = els.copy.textContent;
     els.copy.textContent = "Copied";
+
     setTimeout(() => {
       els.copy.textContent = previous;
     }, 1200);
@@ -685,8 +805,6 @@ function speakText() {
   window.speechSynthesis.speak(utterance);
 }
 
-
-
 function openGuideModal() {
   els.guideModal.classList.remove("hidden");
   document.body.classList.add("modal-open");
@@ -697,6 +815,7 @@ function closeGuideModal() {
   els.guideModal.classList.add("hidden");
   document.body.classList.remove("modal-open");
 }
+
 
 // -----------------------------------------------------------------------------
 // Events
@@ -715,10 +834,16 @@ els.speak.addEventListener("click", speakText);
 els.openGuide.addEventListener("click", openGuideModal);
 els.openGuidePreview.addEventListener("click", openGuideModal);
 els.closeGuide.addEventListener("click", closeGuideModal);
-els.guideModalBackdrop.addEventListener("click", closeGuideModal);
+els.guideModalBackdrop.addEventListener(
+  "click",
+  closeGuideModal,
+);
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !els.guideModal.classList.contains("hidden")) {
+  if (
+    event.key === "Escape" &&
+    !els.guideModal.classList.contains("hidden")
+  ) {
     closeGuideModal();
   }
 });

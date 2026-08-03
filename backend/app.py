@@ -33,7 +33,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -536,6 +536,28 @@ def health():
     }
 
 
+
+@app.get("/hand_landmarker.task", include_in_schema=False)
+def hand_landmarker_task():
+    """Serve the MediaPipe model used by the browser-side hand tracker."""
+    model_path = os.path.join(
+        MODELS_DIR,
+        "hand_landmarker.task",
+    )
+
+    if not os.path.exists(model_path):
+        raise HTTPException(
+            status_code=404,
+            detail="hand_landmarker.task was not found.",
+        )
+
+    return FileResponse(
+        model_path,
+        media_type="application/octet-stream",
+        filename="hand_landmarker.task",
+    )
+
+
 @app.get("/config")
 def config():
     engine = require_engine()
@@ -832,7 +854,54 @@ async def websocket_stream(
                 continue
 
             # -------------------------------------------------------------
-            # Normal camera frame
+            # Browser-side MediaPipe landmarks
+            # -------------------------------------------------------------
+            if "landmarks" in message:
+                landmarks = message.get(
+                    "landmarks",
+                )
+
+                array = np.asarray(
+                    landmarks,
+                    dtype=np.float32,
+                )
+
+                if array.size == 0:
+                    coords = None
+                elif array.size == 63:
+                    coords = array.reshape(
+                        21,
+                        3,
+                    )
+                elif array.shape == (
+                    21,
+                    3,
+                ):
+                    coords = array
+                else:
+                    await websocket.send_json(
+                        {
+                            "error": (
+                                "landmarks must be 21x3 "
+                                "or an empty list."
+                            )
+                        }
+                    )
+                    continue
+
+                result = run_on_landmarks(
+                    session,
+                    coords,
+                )
+
+                await websocket.send_json(
+                    result,
+                )
+
+                continue
+
+            # -------------------------------------------------------------
+            # Legacy full-image fallback
             # -------------------------------------------------------------
             image = message.get(
                 "image",
@@ -842,7 +911,7 @@ async def websocket_stream(
                 await websocket.send_json(
                     {
                         "error": (
-                            "Missing image field."
+                            "Missing landmarks or image field."
                         )
                     }
                 )
