@@ -39,5 +39,8 @@
   "stability_frames": 12,
   "min_confidence": 0.55,
   "artifacts_dir": "artifacts",
-  "models_dir": "models"
+  "models_dir": "models",
+  "static_hold_seconds": 0.75,
+  "static_max_gap_seconds": 0.55,
+  "min_dynamic_frames": 10
 }

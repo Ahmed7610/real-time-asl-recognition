@@ -214,9 +214,24 @@ class Engine:
                 )
 
                 word_builder = WordBuilder(
-                    int(
-                        self.cfg["stability_frames"]
-                    )
+                    stability_frames=int(
+                        self.cfg.get(
+                            "stability_frames",
+                            12,
+                        )
+                    ),
+                    hold_seconds=float(
+                        self.cfg.get(
+                            "static_hold_seconds",
+                            0.75,
+                        )
+                    ),
+                    max_gap_seconds=float(
+                        self.cfg.get(
+                            "static_max_gap_seconds",
+                            0.55,
+                        )
+                    ),
                 )
 
                 session = Session(
@@ -574,6 +589,18 @@ def config():
         ],
         "smoothing_window": cfg["smoothing_window"],
         "stability_frames": cfg["stability_frames"],
+        "static_hold_seconds": cfg.get(
+            "static_hold_seconds",
+            0.75,
+        ),
+        "static_max_gap_seconds": cfg.get(
+            "static_max_gap_seconds",
+            0.55,
+        ),
+        "min_dynamic_frames": cfg.get(
+            "min_dynamic_frames",
+            10,
+        ),
         "min_confidence": cfg.get(
             "min_confidence",
             0.55,
@@ -815,10 +842,60 @@ async def websocket_stream(
             # -------------------------------------------------------------
             if message_type == "dynamic_stop":
                 with session.lock:
-                    result = (
-                        session.translator
-                        .finish_dynamic_recording()
+                    # New browser-side recording mode:
+                    # the browser captures every local MediaPipe frame and
+                    # sends the complete sequence once at stop time. This
+                    # avoids limiting J/Z to the cloud prediction response rate.
+                    sequence = message.get(
+                        "sequence",
                     )
+
+                    if sequence is not None:
+                        sequence_array = np.asarray(
+                            sequence,
+                            dtype=np.float32,
+                        )
+
+                        valid_sequence = (
+                            sequence_array.ndim == 3
+                            and sequence_array.shape[1:] == (
+                                21,
+                                3,
+                            )
+                        )
+
+                        if not valid_sequence:
+                            result = (
+                                session.translator
+                                .finish_dynamic_recording()
+                            )
+
+                            result["error"] = (
+                                "Dynamic sequence must have "
+                                "shape (frames, 21, 3)."
+                            )
+                        else:
+                            # The frontend owns this recording, so replace any
+                            # network-collected frames instead of duplicating.
+                            session.translator.dynamic_sequence = []
+                            session.translator.j_pose_history = []
+                            session.translator.z_pose_history = []
+
+                            for coords in sequence_array:
+                                session.translator.process_landmarks(
+                                    coords,
+                                )
+
+                            result = (
+                                session.translator
+                                .finish_dynamic_recording()
+                            )
+                    else:
+                        # Backwards-compatible mode.
+                        result = (
+                            session.translator
+                            .finish_dynamic_recording()
+                        )
 
                     letter = result.get(
                         "letter",

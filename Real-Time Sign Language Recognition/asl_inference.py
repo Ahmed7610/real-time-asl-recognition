@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections import Counter, deque
 
 import joblib
@@ -26,7 +27,7 @@ TARGET_FRAMES = 40
 J_THRESHOLD = 0.50
 Z_THRESHOLD = 0.56
 
-MIN_J_POSE_RATIO = 0.70
+MIN_J_POSE_RATIO = 0.55
 MIN_Z_POSE_RATIO = 0.55
 
 MIN_PINKY_PATH_LENGTH = 0.50
@@ -744,40 +745,80 @@ class SignLanguageTranslator:
 
 
 class WordBuilder:
-    """Build text from stable static predictions and accepted dynamic letters."""
+    """Build text using a time-based static hold and accepted dynamic letters."""
 
     def __init__(
         self,
         stability_frames: int = 12,
+        hold_seconds: float = 0.75,
+        max_gap_seconds: float = 0.55,
     ):
-        self.stability = stability_frames
+        # Kept for backwards compatibility and API/config reporting.
+        self.stability = int(stability_frames)
+
+        self.hold_seconds = max(
+            0.10,
+            float(hold_seconds),
+        )
+
+        self.max_gap_seconds = max(
+            0.10,
+            float(max_gap_seconds),
+        )
+
         self.reset()
 
     def reset(self) -> None:
         self.text = ""
         self._candidate = None
-        self._count = 0
+        self._candidate_since = 0.0
+        self._last_seen_at = 0.0
         self._locked = False
 
     def hand_missing(self) -> None:
         self._candidate = None
-        self._count = 0
+        self._candidate_since = 0.0
+        self._last_seen_at = 0.0
         self._locked = False
 
     def update_static(
         self,
         token: str,
+        now: float | None = None,
     ) -> str:
-        if token != self._candidate:
+        if not token or token == "nothing":
+            return self.text
+
+        current_time = (
+            time.monotonic()
+            if now is None
+            else float(now)
+        )
+
+        gap_too_long = (
+            self._last_seen_at > 0.0
+            and current_time - self._last_seen_at
+            > self.max_gap_seconds
+        )
+
+        if (
+            token != self._candidate
+            or gap_too_long
+        ):
             self._candidate = token
-            self._count = 1
-        else:
-            self._count += 1
+            self._candidate_since = current_time
+
+        self._last_seen_at = current_time
 
         if self._locked:
             return self.text
 
-        if self._count < self.stability:
+        held_for = (
+            current_time
+            - self._candidate_since
+        )
+
+        if held_for < self.hold_seconds:
             return self.text
 
         self.text += token
@@ -804,7 +845,8 @@ class WordBuilder:
         self.text += token
 
         self._candidate = token
-        self._count = 0
+        self._candidate_since = 0.0
+        self._last_seen_at = 0.0
         self._locked = True
 
         return self.text

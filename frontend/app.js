@@ -88,6 +88,8 @@ let ws = null;
 let running = false;
 let inFlight = false;
 let dynamicBusy = false;
+let dynamicRecording = false;
+let dynamicSequence = [];
 
 let handLandmarker = null;
 let trackerDelegate = "CPU";
@@ -279,7 +281,11 @@ function startTrackingLoop() {
         els.hand.textContent = latestRawLandmarks ? "yes" : "no";
         updateTrackingFps(now);
 
-        sendLatestLandmarks();
+        if (dynamicRecording) {
+          captureDynamicLandmarks();
+        } else {
+          sendLatestLandmarks();
+        }
       } catch (error) {
         console.error("Browser hand tracking failed:", error);
         setStatus("err", "Hand tracker error");
@@ -292,9 +298,37 @@ function startTrackingLoop() {
   trackingAnimation = requestAnimationFrame(track);
 }
 
+function toModelLandmarks(points) {
+  if (!points) {
+    return [];
+  }
+
+  // Preserve the mirrored coordinate convention used during training.
+  return points.map(([x, y, z]) => [
+    1 - x,
+    y,
+    z,
+  ]);
+}
+
+function captureDynamicLandmarks() {
+  if (!latestRawLandmarks) {
+    return;
+  }
+
+  if (dynamicSequence.length >= 140) {
+    return;
+  }
+
+  dynamicSequence.push(
+    toModelLandmarks(latestRawLandmarks),
+  );
+}
+
 function sendLatestLandmarks() {
   if (
     !running ||
+    dynamicRecording ||
     !ws ||
     ws.readyState !== WebSocket.OPEN ||
     inFlight
@@ -302,14 +336,9 @@ function sendLatestLandmarks() {
     return;
   }
 
-  // Preserve the mirrored coordinate convention used during training.
-  const modelLandmarks = latestRawLandmarks
-    ? latestRawLandmarks.map(([x, y, z]) => [
-        1 - x,
-        y,
-        z,
-      ])
-    : [];
+  const modelLandmarks = toModelLandmarks(
+    latestRawLandmarks,
+  );
 
   inFlight = true;
 
@@ -362,6 +391,8 @@ async function startCamera() {
     running = true;
     inFlight = false;
     dynamicBusy = false;
+    dynamicRecording = false;
+    dynamicSequence = [];
     latestRawLandmarks = null;
     lastVideoTime = -1;
     lastTrackingTime = 0;
@@ -402,6 +433,8 @@ function stopCamera() {
   running = false;
   inFlight = false;
   dynamicBusy = false;
+  dynamicRecording = false;
+  dynamicSequence = [];
   latestRawLandmarks = null;
 
   if (trackingAnimation) {
@@ -576,6 +609,9 @@ function beginDynamicRecording() {
   setStatus("on", "Recording J/Z");
   setMode("Recording dynamic sign");
 
+  dynamicSequence = [];
+  dynamicRecording = true;
+
   ws.send(JSON.stringify({ type: "dynamic_start" }));
 
   const startedAt = performance.now();
@@ -626,11 +662,25 @@ function stopDynamicRecording() {
   setStatus("on", "Processing J/Z");
   setMode("Classifying dynamic sign");
 
-  ws.send(JSON.stringify({ type: "dynamic_stop" }));
+  dynamicRecording = false;
+
+  const recordedSequence = dynamicSequence;
+  dynamicSequence = [];
+
+  console.log(
+    `Sending ${recordedSequence.length} local frames for J/Z classification.`,
+  );
+
+  ws.send(JSON.stringify({
+    type: "dynamic_stop",
+    sequence: recordedSequence,
+  }));
 }
 
 function finishDynamicUi() {
   dynamicBusy = false;
+  dynamicRecording = false;
+  dynamicSequence = [];
 
   els.dynamic.disabled = !running;
   els.dynamic.textContent = "Record J/Z";
