@@ -54,8 +54,6 @@ The deployed application:
 https://real-time-asl-recognition.onrender.com/
 ```
 
-The link will become active after the Hugging Face Space is published.
-
 ---
 
 ## Application Workflow
