@@ -13,8 +13,6 @@
 <p align="center">
   <a href="https://github.com/Ahmed7610/real-time-asl-recognition">GitHub Repository</a>
   ·
-  <a href="https://huggingface.co/spaces/Ahmed6100/real-time-asl-recognition">Hugging Face Space</a>
-  ·
   <a href="https://www.linkedin.com/in/eng-ahmed-hassan-ah6100/">LinkedIn</a>
 </p>
 
