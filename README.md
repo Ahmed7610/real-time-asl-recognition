@@ -51,7 +51,7 @@ The application includes:
 The deployed application:
 
 ```text
-[https://huggingface.co/spaces/Ahmed6100/real-time-asl-recognition](https://real-time-asl-recognition.onrender.com/)
+https://real-time-asl-recognition.onrender.com/
 ```
 
 The link will become active after the Hugging Face Space is published.
